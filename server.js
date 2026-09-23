@@ -24,7 +24,14 @@ const MIME = {
 };
 
 const server = http.createServer((req, res) => {
-  const requestPath = decodeURIComponent((req.url || '/').split('?')[0]);
+  let requestPath;
+  try {
+    requestPath = decodeURIComponent((req.url || '/').split('?')[0]);
+  } catch {
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('Bad Request');
+  }
+
   const relative = requestPath === '/' ? 'index.html' : requestPath.replace(/^\/+/, '');
   const filePath = path.resolve(DIST, relative);
 
