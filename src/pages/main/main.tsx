@@ -142,6 +142,8 @@ const AppWrapper = observer(() => {
 
     React.useEffect(() => {
         const el_dashboard = document.getElementById('id-dbot-dashboard');
+        if (!el_dashboard || typeof window.IntersectionObserver === 'undefined') return;
+
         const observer_dashboard = new window.IntersectionObserver(
             ([entry]) => {
                 if (entry.isIntersecting) {
@@ -152,11 +154,15 @@ const AppWrapper = observer(() => {
             },
             {
                 root: null,
-                threshold: 0.5, // set offset 0.1 means trigger if atleast 10% of element in viewport
+                threshold: 0.5,
             }
         );
 
         observer_dashboard.observe(el_dashboard);
+
+        return () => {
+            observer_dashboard.disconnect();
+        };
     });
 
     React.useEffect(() => {
