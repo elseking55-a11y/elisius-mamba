@@ -391,7 +391,7 @@ const AppWrapper = observer(() => {
                             </div>
                             <div label={<Localize i18n_default_text='Bulk Trade' />} id='id-bulk-trade' />
                             <div label={<Localize i18n_default_text='Copy Trading' />} id='id-copy-trading' />
-                        </Tabs>>
+                        </Tabs>
                         {!isDesktop && right_tab_shadow && <span className='tabs-shadow tabs-shadow--right' />}{' '}
                     </div>
                 </div>
