@@ -76,7 +76,7 @@ const AppWrapper = observer(() => {
     const { clear } = summary_card;
     const { DASHBOARD, BOT_BUILDER } = DBOT_TABS;
     const init_render = React.useRef(true);
-    const hash = ['dashboard', 'bot_builder', 'chart', 'manual_trading', 'bulk_trade', 'free_bots', 'copy_trading'];
+    const hash = ['dashboard', 'bot_builder', 'free_bots', 'manual_trading', 'chart', 'bulk_trade', 'copy_trading'];
     const { isDesktop } = useDevice();
     const location = useLocation();
     const navigate = useNavigate();
@@ -346,7 +346,22 @@ const AppWrapper = observer(() => {
                     <div>
                         {!isDesktop && left_tab_shadow && <span className='tabs-shadow tabs-shadow--left' />}{' '}
                         <Tabs active_index={active_tab} className='main__tabs' onTabItemClick={handleTabChange} top>
-                            <div
+<div
+                                label={
+                                    <>
+                                        <LabelPairedObjectsColumnCaptionRegularIcon
+                                            height='24px'
+                                            width='24px'
+                                            fill='var(--text-general)'
+                                        />
+                                        <Localize i18n_default_text='Dashboard' />
+                                    </>
+                                }
+                                id='id-dbot-dashboard'
+                            >
+                                <Dashboard handleTabChange={handleTabChange} />
+                            </div>
+<div
                                 label={
                                     <>
                                         <LabelPairedObjectsColumnCaptionRegularIcon
@@ -397,11 +412,62 @@ const AppWrapper = observer(() => {
                                     <ChartWrapper show_digits_stats={false} />
                                 </Suspense>
                             </div>
-                            <div label={<Localize i18n_default_text='Manual Trading' />} id='id-manual-trading' />
-                            <div label={<Localize i18n_default_text='Bulk Trade' />} id='id-bulk-trade' />
                             <div label={<Localize i18n_default_text='Free Bots' />} id='id-free-bots' />
+                            <div label={<Localize i18n_default_text='Manual Trading' />} id='id-manual-trading' />
+<div
+                                label={
+                                    <>
+                                        <LabelPairedObjectsColumnCaptionRegularIcon
+                                            height='24px'
+                                            width='24px'
+                                            fill='var(--text-general)'
+                                        />
+                                        <Localize i18n_default_text='Dashboard' />
+                                    </>
+                                }
+                                id='id-dbot-dashboard'
+                            >
+                                <Dashboard handleTabChange={handleTabChange} />
+                            </div>
+                            <div
+                                label={
+                                    <>
+                                        <LabelPairedPuzzlePieceTwoCaptionBoldIcon
+                                            height='24px'
+                                            width='24px'
+                                            fill='var(--text-general)'
+                                        />
+                                        <Localize i18n_default_text='Bot Builder' />
+                                    </>
+                                }
+                                id='id-bot-builder'
+                            />
+                            <div
+                                label={
+                                    <>
+                                        <LabelPairedChartLineCaptionRegularIcon
+                                            height='24px'
+                                            width='24px'
+                                            fill='var(--text-general)'
+                                        />
+                                        <Localize i18n_default_text='Charts' />
+                                    </>
+                                }
+                                id={
+                                    is_chart_modal_visible || is_trading_view_modal_visible
+                                        ? 'id-charts--disabled'
+                                        : 'id-charts'
+                                }
+                            >
+                                <Suspense
+                                    fallback={<ChunkLoader message={localize('Please wait, loading chart...')} />}
+                                >
+                                    <ChartWrapper show_digits_stats={false} />
+                                </Suspense>
+                            </div>
+                            <div label={<Localize i18n_default_text='Bulk Trade' />} id='id-bulk-trade' />
                             <div label={<Localize i18n_default_text='Copy Trading' />} id='id-copy-trading' />
-                        </Tabs>
+                        </Tabs>>
                         {!isDesktop && right_tab_shadow && <span className='tabs-shadow tabs-shadow--right' />}{' '}
                     </div>
                 </div>
