@@ -1,8 +1,9 @@
-// @ts-nocheck — vendored bot code with known upstream type gaps; see AGENTS.md
-import React, { lazy, Suspense, useEffect, useState } from 'react';
+// @ts-nocheck
+import React, { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import classNames from 'classnames';
 import { observer } from 'mobx-react-lite';
 import { useLocation, useNavigate } from 'react-router';
+
 import ChunkLoader from '@/components/loader/chunk-loader';
 import { generateOAuthURL } from '@/components/shared';
 import DesktopWrapper from '@/components/shared_ui/desktop-wrapper';
@@ -37,6 +38,7 @@ import {
 } from '@deriv/quill-icons/LabelPaired';
 import { Localize, localize } from '@deriv-com/translations';
 import { useDevice } from '@deriv-com/ui';
+
 import RunPanel from '../../components/run-panel';
 import ChartModal from '../chart/chart-modal';
 import Dashboard from '../dashboard';
@@ -45,10 +47,23 @@ import './main.scss';
 
 const ChartWrapper = lazy(() => import('../chart/chart-wrapper'));
 
+const NAV_ITEMS = [
+    { hash: 'dashboard', id: 'id-dbot-dashboard', label: 'Dashboard' },
+    { hash: 'bot_builder', id: 'id-bot-builder', label: 'Bot Builder' },
+    { hash: 'free_bots', id: 'id-free-bots', label: 'Free Bots' },
+    { hash: 'manual_trading', id: 'id-manual-trading', label: 'Manual Trading' },
+    { hash: 'chart', id: 'id-charts', label: 'Charts' },
+    { hash: 'bulk_trade', id: 'id-bulk-trade', label: 'Bulk Trade' },
+    { hash: 'copy_trading', id: 'id-copy-trading', label: 'Copy Trading' },
+] as const;
+
+const NAV_HASHES = NAV_ITEMS.map(item => item.hash);
+
 const AppWrapper = observer(() => {
     const { connectionStatus } = useApiBase();
     const { dashboard, load_modal, run_panel, quick_strategy, summary_card, blockly_store } = useStore();
     const { is_loading } = blockly_store;
+
     const {
         active_tab,
         active_tour,
@@ -59,10 +74,10 @@ const AppWrapper = observer(() => {
         setActiveTour,
         setTourDialogVisibility,
     } = dashboard;
+
     const { dashboard_strategies } = load_modal;
     const {
         is_dialog_open,
-        is_drawer_open,
         dialog_options,
         onCancelButtonClick,
         onCloseDialog,
@@ -70,339 +85,263 @@ const AppWrapper = observer(() => {
         stopBot,
     } = run_panel;
     const { is_open } = quick_strategy;
-    const { cancel_button_text, ok_button_text, title, message, dismissable, is_closed_on_cancel } = dialog_options as {
-        [key: string]: string;
-    };
+    const { cancel_button_text, ok_button_text, title, message, dismissable, is_closed_on_cancel } =
+        dialog_options as { [key: string]: string };
     const { clear } = summary_card;
     const { DASHBOARD, BOT_BUILDER } = DBOT_TABS;
-    const init_render = React.useRef(true);
-    const hash = ['dashboard', 'bot_builder', 'free_bots', 'manual_trading', 'chart', 'bulk_trade', 'copy_trading'];
-    const { isDesktop } = useDevice();
+
     const location = useLocation();
     const navigate = useNavigate();
-    const [left_tab_shadow, setLeftTabShadow] = useState<boolean>(false);
+    const { isDesktop } = useDevice();
+    const init_render = useRef(true);
 
-    // Trade type modal state
     const [tradeTypeModalState, setTradeTypeModalState] = useState(getModalState());
 
-    /**
-     * Helper function to get modal props with enhanced type safety and clear documentation
-     *
-     * Props serve distinct purposes:
-     * - current_trade_type: Technical identifier for API/internal use (format: "category/type")
-     * - current_trade_type_display_name: Human-readable name for UI display
-     *
-     * This separation ensures proper data flow between technical systems and user interface
-     */
+    const is_preview_mode = window.location.pathname.includes('/preview');
+
+    const getTabFromHash = useCallback(
+        (fallback: number) => {
+            const value = location.hash.replace(/^#/, '');
+            if (!value) return is_preview_mode ? BOT_BUILDER : fallback;
+
+            const index = NAV_HASHES.indexOf(value as (typeof NAV_HASHES)[number]);
+            return index >= 0 ? index : is_preview_mode ? BOT_BUILDER : fallback;
+        },
+        [BOT_BUILDER, is_preview_mode, location.hash]
+    );
+
+    const activeHashTab = getTabFromHash(active_tab);
+
+    const handleTabChange = useCallback(
+        (index: number) => {
+            if (index < 0 || index >= NAV_ITEMS.length) return;
+
+            setActiveTab(index);
+
+            const elementId = TAB_IDS[index] || NAV_ITEMS[index].id;
+            const element = document.getElementById(elementId);
+
+            window.setTimeout(() => {
+                element?.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'center',
+                    inline: 'center',
+                });
+            }, 10);
+        },
+        [setActiveTab]
+    );
+
+    useEffect(() => {
+        setModalStateChangeCallback(setTradeTypeModalState);
+        return () => setModalStateChangeCallback(() => {});
+    }, []);
+
+    useEffect(() => {
+        resetUrlParamProcessing();
+    }, [location.search]);
+
+    useEffect(() => {
+        if (connectionStatus === CONNECTION_STATUS.OPENED) return;
+
+        const botIsRunning = document.getElementById('db-animation__stop-button') !== null;
+        if (!botIsRunning) return;
+
+        clear();
+        stopBot();
+        api_base.setIsRunning(false);
+        setWebSocketState(false);
+    }, [clear, connectionStatus, setWebSocketState, stopBot]);
+
+    useEffect(() => {
+        let pollTimer: ReturnType<typeof setTimeout> | undefined;
+        let modalTimer: ReturnType<typeof setTimeout> | undefined;
+        let frameId: number | undefined;
+
+        if (active_tab !== BOT_BUILDER) {
+            return undefined;
+        }
+
+        frameId = window.requestAnimationFrame(() => {
+            disableUrlParameterApplication();
+            setupTradeTypeChangeListener();
+
+            const showTradeTypeModal = () => {
+                checkAndShowTradeTypeModal(
+                    () => enableUrlParameterApplication(),
+                    () => {}
+                );
+            };
+
+            if (!blockly_store.is_loading) {
+                modalTimer = window.setTimeout(showTradeTypeModal, 500);
+                return;
+            }
+
+            let attempts = 0;
+            const maxAttempts = 10;
+
+            const waitForBlockly = () => {
+                if (!blockly_store.is_loading) {
+                    showTradeTypeModal();
+                    return;
+                }
+
+                if (attempts >= maxAttempts) {
+                    console.warn('Blockly loading timeout; continuing without URL trade-type processing.');
+                    return;
+                }
+
+                attempts += 1;
+                pollTimer = window.setTimeout(waitForBlockly, 500);
+            };
+
+            waitForBlockly();
+        });
+
+        return () => {
+            if (frameId !== undefined) window.cancelAnimationFrame(frameId);
+            if (pollTimer) window.clearTimeout(pollTimer);
+            if (modalTimer) window.clearTimeout(modalTimer);
+        };
+    }, [active_tab, blockly_store.is_loading, BOT_BUILDER]);
+
+    useEffect(() => {
+        if (is_open) setTourDialogVisibility(false);
+
+        if (init_render.current) {
+            setActiveTab(Number(activeHashTab));
+            init_render.current = false;
+        } else {
+            const search = window.location.search;
+            const nextHash = NAV_HASHES[active_tab] || NAV_HASHES[0];
+            navigate(`${search}#${nextHash}`, { replace: true });
+        }
+
+        if (active_tour) setActiveTour('');
+    }, [
+        activeHashTab,
+        active_tab,
+        active_tour,
+        is_open,
+        navigate,
+        setActiveTab,
+        setActiveTour,
+        setTourDialogVisibility,
+    ]);
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            const workspace = (window as any).Blockly?.derivWorkspace;
+            if (active_tab !== BOT_BUILDER || !workspace?.trashcan) return;
+
+            const y = window.innerHeight - 250;
+            const x = is_drawer_open_position() ? (isDbotRTL() ? 380 : window.innerWidth - 460) : (isDbotRTL() ? 20 : window.innerWidth - 100);
+            workspace.trashcan.setTrashcanPosition(x, y);
+        }, 100);
+
+        return () => window.clearTimeout(timer);
+
+        function is_drawer_open_position() {
+            return Boolean(run_panel.is_drawer_open);
+        }
+    }, [active_tab, BOT_BUILDER, run_panel.is_drawer_open]);
+
+    useEffect(() => {
+        if (!dashboard_strategies.length) return undefined;
+
+        const timer = window.setTimeout(updateWorkspaceName);
+        return () => window.clearTimeout(timer);
+    }, [dashboard_strategies, active_tab]);
+
+    const handleLoginGeneration = async () => {
+        const oauthUrl = await generateOAuthURL();
+        if (oauthUrl) window.location.replace(oauthUrl);
+        else console.error('Failed to generate OAuth URL');
+    };
+
     const getTradeTypeModalProps = () => {
         const { tradeTypeData } = tradeTypeModalState;
 
         return {
             is_visible: tradeTypeModalState.isVisible,
             trade_type_display_name: tradeTypeData?.displayName || '',
-
-            // Technical identifier for internal/API use (e.g., "callput/callput")
-            // Used by backend systems and technical integrations
             current_trade_type: tradeTypeData?.currentTradeType
                 ? `${tradeTypeData.currentTradeType.tradeTypeCategory}/${tradeTypeData.currentTradeType.tradeType}`
                 : 'N/A',
-
-            // Human-readable display name for UI (e.g., "Rise/Fall")
-            // Used for user-facing text and modal content
             current_trade_type_display_name: tradeTypeData?.currentTradeTypeDisplayName || 'N/A',
-
-            onConfirm: handleTradeTypeConfirm,
-            onCancel: handleTradeTypeCancel,
         };
     };
 
-    // App Builder embeds the bot at /bot/preview — open the bot builder there by
-    // default (instead of the dashboard) when no explicit #tab hash is present.
-    const is_preview_mode = window.location.pathname.includes('/preview');
-    const GetHashedValue = (tab: number) => {
-        const tab_value = location.hash?.split('#')[1];
-        if (!tab_value) return is_preview_mode ? BOT_BUILDER : tab;
-        const hash_index = hash.indexOf(tab_value);
-        return hash_index >= 0 ? hash_index : (is_preview_mode ? BOT_BUILDER : tab);
-    };
-    const active_hash_tab = GetHashedValue(active_tab);
+    const modalProps = getTradeTypeModalProps();
 
-    // Set up modal state change listener
-    React.useEffect(() => {
-        setModalStateChangeCallback(new_state => {
-            setTradeTypeModalState(new_state);
-        });
-    }, [is_loading]);
-
-    // Reset URL parameter processing when location changes
-    React.useEffect(() => {
-        resetUrlParamProcessing();
-    }, [location.search]);
-
-    React.useEffect(() => {
-        const el_dashboard = document.getElementById('id-dbot-dashboard');
-        if (!el_dashboard || typeof window.IntersectionObserver === 'undefined') return;
-
-        const observer_dashboard = new window.IntersectionObserver(
-            ([entry]) => {
-                if (entry.isIntersecting) {
-                    setLeftTabShadow(false);
-                    return;
-                }
-                setLeftTabShadow(true);
-            },
-            {
-                root: null,
-                threshold: 0.5,
-            }
-        );
-
-        observer_dashboard.observe(el_dashboard);
-
-        return () => {
-            observer_dashboard.disconnect();
-        };
-    }, []);
-
-    React.useEffect(() => {
-        if (connectionStatus !== CONNECTION_STATUS.OPENED) {
-            const is_bot_running = document.getElementById('db-animation__stop-button') !== null;
-            if (is_bot_running) {
-                clear();
-                stopBot();
-                api_base.setIsRunning(false);
-                setWebSocketState(false);
-            }
-        }
-    }, [clear, connectionStatus, setWebSocketState, stopBot]);
-
-    // Update tab shadows height to match bot builder height
-    const updateTabShadowsHeight = () => {
-        const botBuilderEl = document.getElementById('id-bot-builder');
-        const leftShadow = document.querySelector('.tabs-shadow--left') as HTMLElement;
-        if (botBuilderEl && leftShadow) {
-            const height = botBuilderEl.offsetHeight;
-            leftShadow.style.height = `${height}px`;
-        }
-    };
-
-    React.useEffect(() => {
-        let pollTimeoutId: ReturnType<typeof setTimeout> | null = null;
-        let modalTimeoutId: ReturnType<typeof setTimeout> | null = null;
-
-        // Handle URL trade type parameters when switching to Bot Builder tab
-        if (active_tab === BOT_BUILDER) {
-            // Use requestAnimationFrame to ensure Blockly workspace is fully initialized
-            requestAnimationFrame(() => {
-                // Disable automatic URL parameter application to prevent changes before modal
-                disableUrlParameterApplication();
-
-                // Set up listener for manual trade type changes (only once)
-                setupTradeTypeChangeListener();
-
-                // Create unified handler for both immediate and delayed execution
-                const handleTradeTypeModal = () => {
-                    checkAndShowTradeTypeModal(
-                        // onConfirm: Changes are now handled by the modal component
-                        () => {
-                            // Re-enable URL parameter application for future parameters
-                            enableUrlParameterApplication();
-                        },
-                        // onCancel: URL parameter removal is now handled by the modal component
-                        () => {}
-                    );
-                };
-
-                // Wait for Blockly to finish loading before checking for URL parameters
-                if (!blockly_store.is_loading) {
-                    // Blockly is loaded, but add longer delay to ensure workspace is fully initialized
-                    // and trade type fields are populated
-                    modalTimeoutId = setTimeout(() => {
-                        handleTradeTypeModal();
-                    }, 500);
-                } else {
-                    // Blockly is still loading, wait for it to finish with optimized polling
-                    let pollAttempts = 0;
-                    const maxPollAttempts = 10; // Maximum 5 seconds (10 * 500ms) - optimized performance
-
-                    const checkBlocklyLoaded = () => {
-                        if (!blockly_store.is_loading) {
-                            handleTradeTypeModal();
-                            return; // Exit polling once loaded
-                        }
-
-                        if (pollAttempts < maxPollAttempts) {
-                            pollAttempts++;
-                            // Use 500ms intervals for better performance (5x improvement from 100ms)
-                            pollTimeoutId = setTimeout(checkBlocklyLoaded, 500);
-                        } else {
-                            console.warn(
-                                'Blockly loading timeout after 5 seconds - proceeding without URL parameter check'
-                            );
-                        }
-                    };
-
-                    checkBlocklyLoaded();
-                }
-            });
-        }
-
-        // Cleanup function to prevent memory leaks
-        return () => {
-            if (pollTimeoutId) {
-                clearTimeout(pollTimeoutId);
-                pollTimeoutId = null;
-            }
-            if (modalTimeoutId) {
-                clearTimeout(modalTimeoutId);
-                modalTimeoutId = null;
-            }
-        };
-    }, [active_tab, is_loading]);
-
-    React.useEffect(() => {
-        // Run on mount and when active tab changes
-        updateTabShadowsHeight();
-
-        if (is_open) {
-            setTourDialogVisibility(false);
-        }
-        if (init_render.current) {
-            setActiveTab(Number(active_hash_tab));
-            if (!isDesktop) handleTabChange(Number(active_hash_tab));
-            init_render.current = false;
-        } else {
-            // Preserve URL parameters when navigating
-            const currentSearch = window.location.search;
-            navigate(`${currentSearch}#${hash[active_tab] || hash[0]}`);
-        }
-        if (active_tour !== '') {
-            setActiveTour('');
-        }
-
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [active_tab]);
-
-    React.useEffect(() => {
-        const trashcan_init_id = setTimeout(() => {
-            const BlocklyGlobal = (window as any).Blockly;
-            if (active_tab === BOT_BUILDER && BlocklyGlobal?.derivWorkspace?.trashcan) {
-                const trashcanY = window.innerHeight - 250;
-                let trashcanX;
-                if (is_drawer_open) {
-                    trashcanX = isDbotRTL() ? 380 : window.innerWidth - 460;
-                } else {
-                    trashcanX = isDbotRTL() ? 20 : window.innerWidth - 100;
-                }
-                BlocklyGlobal.derivWorkspace.trashcan.setTrashcanPosition(trashcanX, trashcanY);
-            }
-        }, 100);
-
-        return () => {
-            clearTimeout(trashcan_init_id); // Clear the timeout on unmount
-        };
-        //eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [active_tab, is_drawer_open]);
-
-    useEffect(() => {
-        let timer: ReturnType<typeof setTimeout>;
-        if (dashboard_strategies.length > 0) {
-            // Needed to pass this to the Callback Queue as on tab changes
-            // document title getting override by 'Bot | Deriv' only
-            timer = setTimeout(() => {
-                updateWorkspaceName();
-            });
-        }
-        return () => {
-            if (timer) clearTimeout(timer);
-        };
-    }, [dashboard_strategies, active_tab]);
-
-    const handleTabChange = React.useCallback(
-        (tab_index: number) => {
-            setActiveTab(tab_index);
-            const el_id = TAB_IDS[tab_index];
-            if (el_id) {
-                const el_tab = document.getElementById(el_id);
-                setTimeout(() => {
-                    el_tab?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
-                }, 10);
-            }
-        },
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-        [active_tab]
-    );
-
-    // [AI]
-    const handleLoginGeneration = async () => {
-        const oauthUrl = await generateOAuthURL();
-        if (oauthUrl) {
-            window.location.replace(oauthUrl);
-        } else {
-            console.error('Failed to generate OAuth URL');
-        }
-    };
-    // [/AI]
     return (
-        <React.Fragment>
+        <>
             <div className='main'>
                 <div
                     className={classNames('main__container', {
                         'main__container--active': active_tour && active_tab === DASHBOARD && !isDesktop,
                     })}
                 >
-                    <div>
-                        {!isDesktop && left_tab_shadow && <span className='tabs-shadow tabs-shadow--left' />}{' '}
-                        <Tabs active_index={active_tab} className='main__tabs' onTabItemClick={handleTabChange} top>
-                            <div
-                                label={
-                                    <>
-                                        <LabelPairedObjectsColumnCaptionRegularIcon height='24px' width='24px' fill='var(--text-general)' />
-                                        <Localize i18n_default_text='Dashboard' />
-                                    </>
-                                }
-                                id='id-dbot-dashboard'
-                            >
-                                <Dashboard handleTabChange={handleTabChange} />
-                            </div>
-                            <div
-                                label={
-                                    <>
-                                        <LabelPairedPuzzlePieceTwoCaptionBoldIcon height='24px' width='24px' fill='var(--text-general)' />
-                                        <Localize i18n_default_text='Bot Builder' />
-                                    </>
-                                }
-                                id='id-bot-builder'
-                            />
-                            <div
-                                label={
-                                    <>
-                                        <LabelPairedChartLineCaptionRegularIcon height='24px' width='24px' fill='var(--text-general)' />
-                                        <Localize i18n_default_text='Free Bots' />
-                                    </>
-                                }
-                                id='id-free-bots'
-                            />
-                            <div label={<Localize i18n_default_text='Manual Trading' />} id='id-manual-trading' />
-                            <div
-                                label={
-                                    <>
-                                        <LabelPairedChartLineCaptionRegularIcon height='24px' width='24px' fill='var(--text-general)' />
-                                        <Localize i18n_default_text='Charts' />
-                                    </>
-                                }
-                                id={is_chart_modal_visible || is_trading_view_modal_visible ? 'id-charts--disabled' : 'id-charts'}
-                            >
-                                <Suspense fallback={<ChunkLoader message={localize('Please wait, loading chart...')} />}>
-                                    <ChartWrapper show_digits_stats={false} />
-                                </Suspense>
-                            </div>
-                            <div label={<Localize i18n_default_text='Bulk Trade' />} id='id-bulk-trade' />
-                            <div label={<Localize i18n_default_text='Copy Trading' />} id='id-copy-trading' />
-                        </Tabs>
-                    </div>
+                    <Tabs active_index={active_tab} className='main__tabs' onTabItemClick={handleTabChange} top>
+                        <div
+                            label={
+                                <>
+                                    <LabelPairedObjectsColumnCaptionRegularIcon height='24px' width='24px' fill='var(--text-general)' />
+                                    <Localize i18n_default_text='Dashboard' />
+                                </>
+                            }
+                            id='id-dbot-dashboard'
+                        >
+                            <Dashboard handleTabChange={handleTabChange} />
+                        </div>
+
+                        <div
+                            label={
+                                <>
+                                    <LabelPairedPuzzlePieceTwoCaptionBoldIcon height='24px' width='24px' fill='var(--text-general)' />
+                                    <Localize i18n_default_text='Bot Builder' />
+                                </>
+                            }
+                            id='id-bot-builder'
+                        />
+
+                        <div
+                            label={
+                                <>
+                                    <LabelPairedChartLineCaptionRegularIcon height='24px' width='24px' fill='var(--text-general)' />
+                                    <Localize i18n_default_text='Free Bots' />
+                                </>
+                            }
+                            id='id-free-bots'
+                        />
+
+                        <div label={<Localize i18n_default_text='Manual Trading' />} id='id-manual-trading' />
+
+                        <div
+                            label={
+                                <>
+                                    <LabelPairedChartLineCaptionRegularIcon height='24px' width='24px' fill='var(--text-general)' />
+                                    <Localize i18n_default_text='Charts' />
+                                </>
+                            }
+                            id={
+                                is_chart_modal_visible || is_trading_view_modal_visible
+                                    ? 'id-charts--disabled'
+                                    : 'id-charts'
+                            }
+                        >
+                            <Suspense fallback={<ChunkLoader message={localize('Please wait, loading chart...')} />}>
+                                <ChartWrapper show_digits_stats={false} />
+                            </Suspense>
+                        </div>
+
+                        <div label={<Localize i18n_default_text='Bulk Trade' />} id='id-bulk-trade' />
+                        <div label={<Localize i18n_default_text='Copy Trading' />} id='id-copy-trading' />
+                    </Tabs>
                 </div>
             </div>
+
             <DesktopWrapper>
                 <div className='main__run-strategy-wrapper'>
                     <RunStrategy />
@@ -411,7 +350,9 @@ const AppWrapper = observer(() => {
                 <ChartModal />
                 <TradingViewModal />
             </DesktopWrapper>
+
             <MobileWrapper>{!is_open && <RunPanel />}</MobileWrapper>
+
             <Dialog
                 cancel_button_text={cancel_button_text || localize('Cancel')}
                 className='dc-dialog__wrapper--fixed'
@@ -425,27 +366,21 @@ const AppWrapper = observer(() => {
                 portal_element_id='modal_root'
                 title={title}
                 login={handleLoginGeneration}
-                dismissable={dismissable} // Prevents closing on outside clicks
+                dismissable={dismissable}
                 is_closed_on_cancel={is_closed_on_cancel}
             >
                 {message}
             </Dialog>
 
-            {/* Trade Type Confirmation Modal */}
-            {(() => {
-                const modalProps = getTradeTypeModalProps();
-                return (
-                    <TradeTypeConfirmationModal
-                        is_visible={modalProps.is_visible}
-                        trade_type_display_name={modalProps.trade_type_display_name}
-                        current_trade_type={modalProps.current_trade_type}
-                        current_trade_type_display_name={modalProps.current_trade_type_display_name}
-                        onConfirm={modalProps.onConfirm}
-                        onCancel={modalProps.onCancel}
-                    />
-                );
-            })()}
-        </React.Fragment>
+            <TradeTypeConfirmationModal
+                is_visible={modalProps.is_visible}
+                trade_type_display_name={modalProps.trade_type_display_name}
+                current_trade_type={modalProps.current_trade_type}
+                current_trade_type_display_name={modalProps.current_trade_type_display_name}
+                onConfirm={handleTradeTypeConfirm}
+                onCancel={handleTradeTypeCancel}
+            />
+        </>
     );
 });
 
