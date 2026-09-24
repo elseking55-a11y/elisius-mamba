@@ -8,25 +8,6 @@
     }
 }
 
-.tabs-shadow {
-    position: absolute;
-    top: 8px;
-    height: 40px;
-    width: 64px;
-    z-index: 1;
-    pointer-events: none;
-
-    &--left {
-        left: 0;
-        background: linear-gradient(-88.07deg, transparent 1.63%, var(--general-section-1) 50.02%);
-    }
-
-    &--right {
-        right: 0;
-        background: linear-gradient(88.07deg, transparent 1.63%, var(--general-section-1) 50.02%);
-    }
-}
-
 .main {
     display: flex;
     overflow: hidden;
