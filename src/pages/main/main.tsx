@@ -81,7 +81,6 @@ const AppWrapper = observer(() => {
     const location = useLocation();
     const navigate = useNavigate();
     const [left_tab_shadow, setLeftTabShadow] = useState<boolean>(false);
-    const [right_tab_shadow, setRightTabShadow] = useState<boolean>(false);
 
     // Trade type modal state
     const [tradeTypeModalState, setTradeTypeModalState] = useState(getModalState());
@@ -120,11 +119,10 @@ const AppWrapper = observer(() => {
     // App Builder embeds the bot at /bot/preview — open the bot builder there by
     // default (instead of the dashboard) when no explicit #tab hash is present.
     const is_preview_mode = window.location.pathname.includes('/preview');
-    let tab_value: number | string = active_tab;
     const GetHashedValue = (tab: number) => {
-        tab_value = location.hash?.split('#')[1];
+        const tab_value = location.hash?.split('#')[1];
         if (!tab_value) return is_preview_mode ? BOT_BUILDER : tab;
-        const hash_index = hash.indexOf(String(tab_value));
+        const hash_index = hash.indexOf(tab_value);
         return hash_index >= 0 ? hash_index : (is_preview_mode ? BOT_BUILDER : tab);
     };
     const active_hash_tab = GetHashedValue(active_tab);
@@ -182,12 +180,9 @@ const AppWrapper = observer(() => {
     const updateTabShadowsHeight = () => {
         const botBuilderEl = document.getElementById('id-bot-builder');
         const leftShadow = document.querySelector('.tabs-shadow--left') as HTMLElement;
-        const rightShadow = document.querySelector('.tabs-shadow--right') as HTMLElement;
-
-        if (botBuilderEl && leftShadow && rightShadow) {
+        if (botBuilderEl && leftShadow) {
             const height = botBuilderEl.offsetHeight;
             leftShadow.style.height = `${height}px`;
-            rightShadow.style.height = `${height}px`;
         }
     };
 
@@ -405,7 +400,6 @@ const AppWrapper = observer(() => {
                             <div label={<Localize i18n_default_text='Bulk Trade' />} id='id-bulk-trade' />
                             <div label={<Localize i18n_default_text='Copy Trading' />} id='id-copy-trading' />
                         </Tabs>
-                        {!isDesktop && right_tab_shadow && <span className='tabs-shadow tabs-shadow--right' />}{' '}
                     </div>
                 </div>
             </div>
