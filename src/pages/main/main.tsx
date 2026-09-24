@@ -124,7 +124,8 @@ const AppWrapper = observer(() => {
     const GetHashedValue = (tab: number) => {
         tab_value = location.hash?.split('#')[1];
         if (!tab_value) return is_preview_mode ? BOT_BUILDER : tab;
-        return Number(hash.indexOf(String(tab_value)));
+        const hash_index = hash.indexOf(String(tab_value));
+        return hash_index >= 0 ? hash_index : (is_preview_mode ? BOT_BUILDER : tab);
     };
     const active_hash_tab = GetHashedValue(active_tab);
 
@@ -163,7 +164,7 @@ const AppWrapper = observer(() => {
         return () => {
             observer_dashboard.disconnect();
         };
-    });
+    }, []);
 
     React.useEffect(() => {
         if (connectionStatus !== CONNECTION_STATUS.OPENED) {
@@ -192,6 +193,7 @@ const AppWrapper = observer(() => {
 
     React.useEffect(() => {
         let pollTimeoutId: ReturnType<typeof setTimeout> | null = null;
+        let modalTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
         // Handle URL trade type parameters when switching to Bot Builder tab
         if (active_tab === BOT_BUILDER) {
@@ -220,7 +222,7 @@ const AppWrapper = observer(() => {
                 if (!blockly_store.is_loading) {
                     // Blockly is loaded, but add longer delay to ensure workspace is fully initialized
                     // and trade type fields are populated
-                    setTimeout(() => {
+                    modalTimeoutId = setTimeout(() => {
                         handleTradeTypeModal();
                     }, 500);
                 } else {
@@ -256,6 +258,10 @@ const AppWrapper = observer(() => {
                 clearTimeout(pollTimeoutId);
                 pollTimeoutId = null;
             }
+            if (modalTimeoutId) {
+                clearTimeout(modalTimeoutId);
+                modalTimeoutId = null;
+            }
         };
     }, [active_tab, is_loading]);
 
@@ -284,7 +290,8 @@ const AppWrapper = observer(() => {
 
     React.useEffect(() => {
         const trashcan_init_id = setTimeout(() => {
-            if (active_tab === BOT_BUILDER && Blockly?.derivWorkspace?.trashcan) {
+            const BlocklyGlobal = (window as any).Blockly;
+            if (active_tab === BOT_BUILDER && BlocklyGlobal?.derivWorkspace?.trashcan) {
                 const trashcanY = window.innerHeight - 250;
                 let trashcanX;
                 if (is_drawer_open) {
@@ -292,7 +299,7 @@ const AppWrapper = observer(() => {
                 } else {
                     trashcanX = isDbotRTL() ? 20 : window.innerWidth - 100;
                 }
-                Blockly?.derivWorkspace?.trashcan?.setTrashcanPosition(trashcanX, trashcanY);
+                BlocklyGlobal.derivWorkspace.trashcan.setTrashcanPosition(trashcanX, trashcanY);
             }
         }, 100);
 
